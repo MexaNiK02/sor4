@@ -1,0 +1,13 @@
+/vendor
+/node_modules
+/public/build
+/storage/*.key
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*.log
+/.env
+/database/database.sqlite
+npm-debug.log
+yarn-error.log
+.DS_Store
