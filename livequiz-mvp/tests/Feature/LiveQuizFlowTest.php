@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Models\Quiz;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class LiveQuizFlowTest extends TestCase
@@ -273,6 +276,32 @@ class LiveQuizFlowTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.quiz.title', 'Квиз с несколькими ответами')
             ->assertJsonPath('data.0.leaderboard.0.name', 'Игрок');
+    }
+
+    public function test_host_can_upload_question_image_from_file_and_url(): void
+    {
+        $headers = $this->hostHeaders('image-host@example.com');
+        File::deleteDirectory(public_path('uploads/question-images'));
+        $imagePath = tempnam(sys_get_temp_dir(), 'livequiz-image-');
+        file_put_contents($imagePath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='));
+
+        $fileResponse = $this->withHeaders($headers)->post('/api/question-images', [
+            'image' => new UploadedFile($imagePath, 'question.png', 'image/png', null, true),
+        ])->assertCreated();
+
+        $this->assertStringContainsString('/uploads/question-images/', $fileResponse->json('url'));
+        $this->assertFileExists(public_path(parse_url($fileResponse->json('url'), PHP_URL_PATH)));
+
+        Http::fake([
+            'https://example.com/picture.jpg' => Http::response('fake-image-content', 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+
+        $urlResponse = $this->withHeaders($headers)->postJson('/api/question-images', [
+            'url' => 'https://example.com/picture.jpg',
+        ])->assertCreated();
+
+        $this->assertStringContainsString('/uploads/question-images/', $urlResponse->json('url'));
+        $this->assertFileExists(public_path(parse_url($urlResponse->json('url'), PHP_URL_PATH)));
     }
 
     private function hostHeaders(string $email = 'host@example.com'): array

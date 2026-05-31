@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ParticipantController;
+use App\Http\Controllers\Api\QuestionImageController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\SessionController;
 use Illuminate\Support\Facades\Route;
@@ -18,6 +19,7 @@ Route::middleware('api.token')->group(function () {
     Route::get('/participant/history', [AuthController::class, 'participantHistory']);
 
     Route::apiResource('quizzes', QuizController::class);
+    Route::post('/question-images', [QuestionImageController::class, 'store']);
     Route::get('/quizzes/{quiz}/sessions', [QuizController::class, 'sessions']);
     Route::post('/quizzes/{quiz}/sessions', [QuizController::class, 'startSession']);
 

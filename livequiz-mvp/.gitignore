@@ -1,6 +1,8 @@
 /vendor
 /node_modules
 /public/build
+/public/uploads/question-images/*
+!/public/uploads/question-images/.gitkeep
 /bootstrap/cache/*.php
 /storage/*.key
 /storage/framework/cache/data/*

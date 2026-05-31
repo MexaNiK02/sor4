@@ -141,6 +141,50 @@ function QuestionImages({ images = [] }) {
   );
 }
 
+function QuestionImageEditor({ images, draft, loading, onDraftChange, onUrlKeyDown, onFileChange, onRemove }) {
+  const canAdd = images.length < 4;
+
+  return (
+    <div className="question-image-editor">
+      {images.length > 0 && (
+        <div className="question-image-previews">
+          {images.map((src, index) => (
+            <div className="question-image-preview" key={`${src}-${index}`}>
+              <img src={src} alt={`Картинка ${index + 1}`} />
+              <button type="button" onClick={() => onRemove(index)}>Удалить</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {canAdd && (
+        <div className="question-image-add">
+          <label>Картинка {images.length + 1}
+            <input
+              placeholder="Вставьте ссылку и нажмите Enter"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              onKeyDown={onUrlKeyDown}
+              disabled={loading}
+            />
+          </label>
+          <label className="file-picker">
+            <span>{loading ? 'Загрузка...' : 'Загрузить с компьютера'}</span>
+            <input
+              type="file"
+              accept="image/*"
+              disabled={loading}
+              onChange={(event) => {
+                onFileChange(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Shell({ children, user, onLogout, activePlayer }) {
   const location = useLocation();
   const player = activePlayer || readActivePlayer();
@@ -446,6 +490,8 @@ function QuizBuilder({ user, onLogout }) {
     questions: [emptyQuestion()],
   });
   const [error, setError] = useState('');
+  const [imageDrafts, setImageDrafts] = useState({});
+  const [uploadingImage, setUploadingImage] = useState(null);
 
   useEffect(() => {
     if (!editing) return;
@@ -493,17 +539,51 @@ function QuizBuilder({ user, onLogout }) {
     }));
   }
 
-  function updateQuestionImage(questionIndex, imageIndex, value) {
+  function addQuestionImage(questionIndex, url) {
     setForm((current) => ({
       ...current,
       questions: current.questions.map((question, index) => {
         if (index !== questionIndex) return question;
-        const images = [...(question.image_urls || [])];
-        images[imageIndex] = value;
 
-        return { ...question, image_urls: images };
+        return { ...question, image_urls: [...(question.image_urls || []), url].filter(Boolean).slice(0, 4) };
       }),
     }));
+  }
+
+  function removeQuestionImage(questionIndex, imageIndex) {
+    setForm((current) => ({
+      ...current,
+      questions: current.questions.map((question, index) => {
+        if (index !== questionIndex) return question;
+
+        return { ...question, image_urls: (question.image_urls || []).filter((_, currentImageIndex) => currentImageIndex !== imageIndex) };
+      }),
+    }));
+  }
+
+  async function uploadQuestionImage(questionIndex, payload) {
+    setError('');
+    setUploadingImage(questionIndex);
+
+    try {
+      const body = new FormData();
+      if (payload.file) body.append('image', payload.file);
+      if (payload.url) body.append('url', payload.url);
+      const response = await api.postForm('/question-images', body);
+      addQuestionImage(questionIndex, response.url);
+      setImageDrafts((current) => ({ ...current, [questionIndex]: '' }));
+    } catch (event) {
+      setError(event.message);
+    } finally {
+      setUploadingImage(null);
+    }
+  }
+
+  function handleImageUrlKeyDown(event, questionIndex) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const url = (imageDrafts[questionIndex] || '').trim();
+    if (url) uploadQuestionImage(questionIndex, { url });
   }
 
   async function submit(event) {
@@ -556,17 +636,15 @@ function QuizBuilder({ user, onLogout }) {
               </label>
             </div>
             <textarea className="question-input" placeholder="Текст вопроса" value={question.text} onChange={(event) => updateQuestion(questionIndex, { text: event.target.value })} />
-            <div className="image-url-grid">
-              {[0, 1, 2, 3].map((imageIndex) => (
-                <label key={imageIndex}>Картинка {imageIndex + 1}
-                  <input
-                    placeholder="https://example.com/image.jpg"
-                    value={(question.image_urls || [])[imageIndex] || ''}
-                    onChange={(event) => updateQuestionImage(questionIndex, imageIndex, event.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
+            <QuestionImageEditor
+              images={question.image_urls || []}
+              draft={imageDrafts[questionIndex] || ''}
+              loading={uploadingImage === questionIndex}
+              onDraftChange={(value) => setImageDrafts((current) => ({ ...current, [questionIndex]: value }))}
+              onUrlKeyDown={(event) => handleImageUrlKeyDown(event, questionIndex)}
+              onFileChange={(file) => file && uploadQuestionImage(questionIndex, { file })}
+              onRemove={(imageIndex) => removeQuestionImage(questionIndex, imageIndex)}
+            />
             <div className="answer-grid">
               {question.answers.map((answer, answerIndex) => (
                 <label className={`answer-input ${answer.is_correct ? 'selected' : ''}`} key={answerIndex}>
