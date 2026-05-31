@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -19,11 +19,13 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { api } from './lib/api';
+import { api, wsUrl } from './lib/api';
 import '../css/app.css';
 
 const emptyQuestion = () => ({
   text: '',
+  type: 'single_choice',
+  image_urls: [],
   timer_seconds: 25,
   answers: [
     { text: '', is_correct: true },
@@ -49,6 +51,51 @@ function saveActivePlayer(player) {
 
 function clearActivePlayer() {
   window.localStorage.removeItem(activePlayerKey);
+}
+
+function useLiveSessionSocket(sessionId, onMessage) {
+  const socketRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+
+    const socket = new WebSocket(wsUrl);
+    socketRef.current = socket;
+
+    socket.addEventListener('open', () => {
+      setConnected(true);
+      socket.send(JSON.stringify({ type: 'subscribe', sessionId }));
+    });
+    socket.addEventListener('message', (event) => {
+      try {
+        onMessage?.(JSON.parse(event.data));
+      } catch {
+        // Ignore malformed websocket payloads.
+      }
+    });
+    socket.addEventListener('close', () => setConnected(false));
+    socket.addEventListener('error', () => setConnected(false));
+
+    return () => {
+      socket.close();
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+    };
+  }, [sessionId, onMessage]);
+
+  return {
+    connected,
+    send: (payload) => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify(payload));
+        return true;
+      }
+
+      return false;
+    },
+  };
 }
 
 function usePolling(callback, delay = 1800) {
@@ -80,6 +127,20 @@ function TimerBadge({ label, seconds }) {
   );
 }
 
+function QuestionImages({ images = [] }) {
+  const visibleImages = (images || []).filter(Boolean).slice(0, 4);
+
+  if (visibleImages.length === 0) return null;
+
+  return (
+    <div className="question-images">
+      {visibleImages.map((src, index) => (
+        <img src={src} alt={`Изображение вопроса ${index + 1}`} key={`${src}-${index}`} />
+      ))}
+    </div>
+  );
+}
+
 function Shell({ children, user, onLogout, activePlayer }) {
   const location = useLocation();
   const player = activePlayer || readActivePlayer();
@@ -96,6 +157,7 @@ function Shell({ children, user, onLogout, activePlayer }) {
         <nav>
           <Link to="/host">Кабинет ведущего</Link>
           <Link to="/join">Присоединиться</Link>
+          {user?.role === 'participant' && <Link to="/participant/history">Моя история</Link>}
           {showActiveGame && (
             <Link className="active-game-link" to={activeGameUrl}>
               <Play size={16} /> Вернуться к игре
@@ -103,7 +165,7 @@ function Shell({ children, user, onLogout, activePlayer }) {
           )}
           {user ? (
             <>
-              <span className="user-pill"><Shield size={15} /> {user.name} · {user.role === 'admin' ? 'админ' : 'ведущий'}</span>
+              <span className="user-pill"><Shield size={15} /> {user.name} · {user.role === 'admin' ? 'админ' : user.role === 'participant' ? 'участник' : 'ведущий'}</span>
               <button className="nav-button" onClick={onLogout}><LogOut size={16} /> Выйти</button>
             </>
           ) : (
@@ -116,9 +178,17 @@ function Shell({ children, user, onLogout, activePlayer }) {
   );
 }
 
-function RequireAuth({ user, onAuth, children }) {
+function RequireAuth({ user, onAuth, children, role }) {
   if (!user) {
-    return <AuthPage onAuth={onAuth} />;
+    return <AuthPage onAuth={onAuth} accountType={role === 'participant' ? 'participant' : 'host'} />;
+  }
+
+  if (role && user.role !== role) {
+    return <AuthPage onAuth={onAuth} accountType={role} />;
+  }
+
+  if (!role && user.role === 'participant') {
+    return <AuthPage onAuth={onAuth} accountType="host" />;
   }
 
   return children;
@@ -168,21 +238,23 @@ function Home({ user, onLogout }) {
   );
 }
 
-function AuthPage({ onAuth }) {
+function AuthPage({ onAuth, accountType = 'host' }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [error, setError] = useState('');
+  const isParticipant = accountType === 'participant';
 
   async function submit(event) {
     event.preventDefault();
     setError('');
     try {
       const payload = mode === 'register' ? form : { email: form.email, password: form.password };
-      const response = await api.post(`/auth/${mode}`, payload);
+      const path = mode === 'register' && isParticipant ? '/participant-auth/register' : `/auth/${mode}`;
+      const response = await api.post(path, payload);
       window.localStorage.setItem('livequiz_token', response.token);
       onAuth?.(response.user);
-      navigate('/host');
+      navigate(isParticipant ? '/participant/history' : '/host');
     } catch (event) {
       setError(event.message);
     }
@@ -192,7 +264,7 @@ function AuthPage({ onAuth }) {
     <Shell>
       <section className="join-screen">
         <form className="join-form auth-form" onSubmit={submit}>
-          <p className="eyebrow">Аккаунт ведущего</p>
+          <p className="eyebrow">{isParticipant ? 'Аккаунт участника' : 'Аккаунт ведущего'}</p>
           <h1>{mode === 'login' ? 'Вход' : 'Регистрация'}</h1>
           {error && <p className="alert">{error}</p>}
           {mode === 'register' && (
@@ -205,8 +277,55 @@ function AuthPage({ onAuth }) {
             {mode === 'login' ? 'Зарегистрироваться' : 'Уже есть аккаунт'}
           </button>
           <p className="muted">Участникам аккаунт не нужен. Они входят только по коду сессии.</p>
+          {!isParticipant && <Link className="btn ghost" to="/participant/login">Войти как участник</Link>}
+          {isParticipant && <Link className="btn ghost" to="/login">Войти как ведущий</Link>}
         </form>
       </section>
+    </Shell>
+  );
+}
+
+function ParticipantHistory({ user, onLogout }) {
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get('/participant/history')
+      .then((response) => setItems(response.data))
+      .catch((event) => setError(event.message));
+  }, []);
+
+  return (
+    <Shell user={user} onLogout={onLogout}>
+      <section className="section-head">
+        <div>
+          <p className="eyebrow">Аккаунт участника</p>
+          <h1>Моя история игр</h1>
+        </div>
+        <Link className="btn primary" to="/join"><ArrowRight size={18} /> Присоединиться к игре</Link>
+      </section>
+      {error && <p className="alert">{error}</p>}
+      <div className="quiz-list">
+        {items.length === 0 && <p className="loading">История пока пустая. Войдите в игру по коду, находясь в аккаунте участника.</p>}
+        {items.map((item) => (
+          <article className="quiz-card" key={`${item.session_id}-${item.participant_id}`}>
+            <div>
+              <h2>{item.quiz?.title || `Игра ${item.code}`}</h2>
+              <p>Код: {item.code} · Статус: {item.status} · Ваши баллы: {item.score} · Место: {item.rank || '-'}</p>
+              <div className="history-leaders">
+                {item.leaderboard.slice(0, 8).map((row) => (
+                  <span className={row.id === item.participant_id ? 'history-self' : ''} key={row.id}>
+                    {row.rank}. {row.name} - {row.score}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="card-actions">
+              <a className="btn ghost" href={api.csvUrl(item.session_id)}><Download size={18} /> CSV</a>
+            </div>
+          </article>
+        ))}
+      </div>
     </Shell>
   );
 }
@@ -360,13 +479,29 @@ function QuizBuilder({ user, onLogout }) {
       ...value,
       questions: value.questions.map((question, index) => {
         if (index !== questionIndex) return question;
+        const multiple = question.type === 'multiple_choice';
         return {
           ...question,
           answers: question.answers.map((answer, currentAnswerIndex) => ({
             ...answer,
-            is_correct: currentAnswerIndex === answerIndex,
+            is_correct: multiple
+              ? (currentAnswerIndex === answerIndex ? !answer.is_correct : answer.is_correct)
+              : currentAnswerIndex === answerIndex,
           })),
         };
+      }),
+    }));
+  }
+
+  function updateQuestionImage(questionIndex, imageIndex, value) {
+    setForm((current) => ({
+      ...current,
+      questions: current.questions.map((question, index) => {
+        if (index !== questionIndex) return question;
+        const images = [...(question.image_urls || [])];
+        images[imageIndex] = value;
+
+        return { ...question, image_urls: images };
       }),
     }));
   }
@@ -379,6 +514,7 @@ function QuizBuilder({ user, onLogout }) {
         ...form,
         questions: form.questions.map((question) => ({
           ...question,
+          image_urls: (question.image_urls || []).filter((url) => url.trim()).slice(0, 4),
           answers: question.answers.filter((answer) => answer.text.trim()),
         })),
       };
@@ -411,11 +547,30 @@ function QuizBuilder({ user, onLogout }) {
               <h2>Вопрос {questionIndex + 1}</h2>
               <label>Таймер<input type="number" min="10" max="120" value={question.timer_seconds} onChange={(event) => updateQuestion(questionIndex, { timer_seconds: Number(event.target.value) })} /></label>
             </div>
+            <div className="question-options-row">
+              <label>Тип вопроса
+                <select value={question.type || 'single_choice'} onChange={(event) => updateQuestion(questionIndex, { type: event.target.value })}>
+                  <option value="single_choice">Одиночный выбор</option>
+                  <option value="multiple_choice">Множественный выбор</option>
+                </select>
+              </label>
+            </div>
             <textarea className="question-input" placeholder="Текст вопроса" value={question.text} onChange={(event) => updateQuestion(questionIndex, { text: event.target.value })} />
+            <div className="image-url-grid">
+              {[0, 1, 2, 3].map((imageIndex) => (
+                <label key={imageIndex}>Картинка {imageIndex + 1}
+                  <input
+                    placeholder="https://example.com/image.jpg"
+                    value={(question.image_urls || [])[imageIndex] || ''}
+                    onChange={(event) => updateQuestionImage(questionIndex, imageIndex, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
             <div className="answer-grid">
               {question.answers.map((answer, answerIndex) => (
                 <label className={`answer-input ${answer.is_correct ? 'selected' : ''}`} key={answerIndex}>
-                  <input type="radio" name={`correct-${questionIndex}`} checked={answer.is_correct} onChange={() => setCorrect(questionIndex, answerIndex)} />
+                  <input type={question.type === 'multiple_choice' ? 'checkbox' : 'radio'} name={`correct-${questionIndex}`} checked={answer.is_correct} onChange={() => setCorrect(questionIndex, answerIndex)} />
                   <input placeholder={`Вариант ${answerIndex + 1}`} value={answer.text} onChange={(event) => updateAnswer(questionIndex, answerIndex, { text: event.target.value })} />
                 </label>
               ))}
@@ -449,7 +604,15 @@ function SessionRoom({ user, onLogout }) {
     }
   }, [code]);
 
-  usePolling(load, 1600);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useLiveSessionSocket(session?.id, React.useCallback((message) => {
+    if (['session.started', 'session.advanced', 'session.finished', 'session.updated', 'participant.joined', 'answer.received', 'timer.tick'].includes(message.event)) {
+      load();
+    }
+  }, [load]));
 
   async function action(path) {
     const response = await api.post(`/sessions/${session.id}/${path}`);
@@ -506,6 +669,7 @@ function SessionRoom({ user, onLogout }) {
                   : <TimerBadge label="Осталось" seconds={questionSeconds} />}
               </div>
               <h2>{session.current_question.text}</h2>
+              <QuestionImages images={session.current_question.image_urls} />
               {session.current_phase === 'reveal' && <div className="reveal-note">Показываем правильный ответ. После таймера игра перейдет дальше.</div>}
               <div className="answers-preview">
                 {session.current_question.answers.map((answer) => (
@@ -554,6 +718,8 @@ function JoinPage({ user, onLogout }) {
           <label>Код сессии<input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} /></label>
           <label>Имя или никнейм<input value={name} onChange={(event) => setName(event.target.value)} /></label>
           <button className="btn primary" type="submit"><ArrowRight size={18} /> Войти</button>
+          {!user && <Link className="btn ghost" to="/participant/login">Войти в аккаунт участника для истории игр</Link>}
+          {user?.role === 'participant' && <p className="muted">Игра сохранится в вашей истории участника.</p>}
         </form>
       </section>
     </Shell>
@@ -565,7 +731,7 @@ function ParticipantPlay({ user, onLogout }) {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || window.localStorage.getItem(`participant:${participantId}`);
   const [state, setState] = useState(null);
-  const [selected, setSelected] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [error, setError] = useState('');
 
   const load = React.useCallback(async () => {
@@ -578,7 +744,18 @@ function ParticipantPlay({ user, onLogout }) {
     }
   }, [participantId, token]);
 
-  usePolling(load, 1000);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const liveSocket = useLiveSessionSocket(state?.session?.id, React.useCallback((message) => {
+    if (['session.started', 'session.advanced', 'session.finished', 'session.updated', 'answer.accepted', 'timer.tick'].includes(message.event)) {
+      load();
+    }
+    if (message.event === 'answer.error') {
+      setError(message.message);
+    }
+  }, [load]));
 
   const phaseKey = `${state?.session?.current_question?.id || 'none'}-${state?.session?.current_phase || 'idle'}`;
   const questionSeconds = useCountdownSeconds(state?.session?.question_seconds_remaining, `${phaseKey}-question`);
@@ -591,14 +768,43 @@ function ParticipantPlay({ user, onLogout }) {
   }, [participantId, token]);
 
   useEffect(() => {
-    setSelected(null);
+    setSelectedIds([]);
   }, [state?.session?.current_question?.id]);
 
-  async function answer(answerId) {
-    setSelected(answerId);
+  function toggleAnswer(answerId) {
+    if (state?.session?.current_question?.type !== 'multiple_choice') {
+      setSelectedIds([answerId]);
+      submitAnswer([answerId]);
+      return;
+    }
+
+    setSelectedIds((current) => current.includes(answerId)
+      ? current.filter((id) => id !== answerId)
+      : [...current, answerId]);
+  }
+
+  async function submitAnswer(answerIds = selectedIds) {
     setError('');
+    if (answerIds.length === 0) {
+      setError('Выберите хотя бы один вариант.');
+      return;
+    }
+
+    const sent = liveSocket.send({
+      type: 'answer',
+      participantId,
+      token,
+      answer_id: answerIds.length === 1 ? answerIds[0] : null,
+      answer_ids: answerIds,
+    });
+
+    if (sent) return;
+
     try {
-      await api.post(`/participants/${participantId}/answers?token=${token}`, { answer_id: answerId });
+      await api.post(`/participants/${participantId}/answers?token=${token}`, {
+        answer_id: answerIds.length === 1 ? answerIds[0] : null,
+        answer_ids: answerIds,
+      });
       await load();
     } catch (event) {
       setError(event.message);
@@ -635,6 +841,7 @@ function ParticipantPlay({ user, onLogout }) {
                 : <TimerBadge label="Осталось" seconds={questionSeconds} />}
             </div>
             <h1>{session.current_question.text}</h1>
+            <QuestionImages images={session.current_question.image_urls} />
             {session.current_phase === 'reveal' ? (
               <>
                 <ResultNotice result={session.current_answer_result} />
@@ -645,7 +852,7 @@ function ParticipantPlay({ user, onLogout }) {
                         className={[
                           'answer-button',
                           item.is_correct ? 'correct' : '',
-                          session.current_answer_result?.selected_answer_id === item.id && !item.is_correct ? 'wrong-selected' : '',
+                          (session.current_answer_result?.selected_answer_ids || []).includes(item.id) && !item.is_correct ? 'wrong-selected' : '',
                         ].filter(Boolean).join(' ')}
                         key={item.id}
                         disabled
@@ -661,10 +868,15 @@ function ParticipantPlay({ user, onLogout }) {
             ) : (
               <div className="player-answers">
                 {session.current_question.answers.map((item) => (
-                  <button className={selected === item.id ? 'answer-button selected' : 'answer-button'} key={item.id} onClick={() => answer(item.id)}>
+                  <button className={selectedIds.includes(item.id) ? 'answer-button selected' : 'answer-button'} key={item.id} onClick={() => toggleAnswer(item.id)}>
                     {item.text}
                   </button>
                 ))}
+                {session.current_question.type === 'multiple_choice' && (
+                  <button className="btn primary answer-submit" type="button" onClick={() => submitAnswer()}>
+                    <CheckCircle2 size={18} /> Отправить ответы
+                  </button>
+                )}
               </div>
             )}
           </article>
@@ -724,7 +936,7 @@ function ResultPage({ embedded = false, participantId: propParticipantId, token:
           )}
           <div className="final-leaderboard">
             <h2>Общий рейтинг</h2>
-            {result.leaderboard.map((row) => (
+            {(result.leaderboard || []).map((row) => (
               <div className={`final-leader-row ${row.id === result.participant.id ? 'self' : ''}`} key={row.id}>
                 <span className="rank">{row.rank}</span>
                 <i style={{ background: row.avatar_color }} />
@@ -816,6 +1028,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Home user={user} onLogout={logout} />} />
         <Route path="/login" element={<AuthPage onAuth={setUser} />} />
+        <Route path="/participant/login" element={<AuthPage onAuth={setUser} accountType="participant" />} />
+        <Route path="/participant/history" element={checkingAuth ? <Shell><p className="loading">Загрузка...</p></Shell> : <RequireAuth user={user} onAuth={setUser} role="participant"><ParticipantHistory user={user} onLogout={logout} /></RequireAuth>} />
         <Route path="/host" element={checkingAuth ? <Shell><p className="loading">Загрузка...</p></Shell> : <RequireAuth user={user} onAuth={setUser}><HostDashboard user={user} onLogout={logout} /></RequireAuth>} />
         <Route path="/host/quizzes/:id/edit" element={checkingAuth ? <Shell><p className="loading">Загрузка...</p></Shell> : <RequireAuth user={user} onAuth={setUser}><QuizBuilder user={user} onLogout={logout} /></RequireAuth>} />
         <Route path="/host/quizzes/new" element={checkingAuth ? <Shell><p className="loading">Загрузка...</p></Shell> : <RequireAuth user={user} onAuth={setUser}><QuizBuilder user={user} onLogout={logout} /></RequireAuth>} />

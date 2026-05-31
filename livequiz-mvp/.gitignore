@@ -1,12 +1,14 @@
 /vendor
 /node_modules
 /public/build
+/bootstrap/cache/*.php
 /storage/*.key
 /storage/framework/cache/data/*
 /storage/framework/sessions/*
 /storage/framework/views/*
 /storage/logs/*.log
 /.env
+/.phpunit.result.cache
 /database/database.sqlite
 npm-debug.log
 yarn-error.log

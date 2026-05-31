@@ -9,11 +9,13 @@ use Illuminate\Support\Facades\Route;
 Route::get('/health', fn () => ['ok' => true, 'name' => config('app.name')]);
 
 Route::post('/auth/register', [AuthController::class, 'register']);
+Route::post('/participant-auth/register', [AuthController::class, 'registerParticipant']);
 Route::post('/auth/login', [AuthController::class, 'login']);
 
 Route::middleware('api.token')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::get('/participant/history', [AuthController::class, 'participantHistory']);
 
     Route::apiResource('quizzes', QuizController::class);
     Route::get('/quizzes/{quiz}/sessions', [QuizController::class, 'sessions']);

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\GameSession;
 use App\Models\Participant;
 use App\Models\User;
+use App\Services\LiveQuizBroadcaster;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
@@ -26,7 +27,7 @@ class SessionController extends Controller
         ]);
     }
 
-    public function join(Request $request, string $code): JsonResponse
+    public function join(Request $request, string $code, LiveQuizBroadcaster $broadcaster): JsonResponse
     {
         $payload = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:40'],
@@ -35,13 +36,18 @@ class SessionController extends Controller
         $session = GameSession::where('code', Str::upper($code))->active()->firstOrFail()->refreshTimedState();
         abort_if($session->status === 'finished', 422, 'Сессия уже завершена.');
 
+        $account = $this->optionalParticipantAccount($request);
+
         $participant = Participant::create([
             'game_session_id' => $session->id,
+            'participant_user_id' => $account?->id,
             'name' => $payload['name'],
             'avatar_color' => collect(['#2563eb', '#059669', '#dc2626', '#7c3aed', '#ea580c', '#0f766e'])->random(),
             'access_token' => Str::random(48),
             'last_seen_at' => now(),
         ]);
+
+        $broadcaster->sessionUpdated($session->fresh(), 'participant.joined');
 
         return response()->json([
             'data' => $participant,
@@ -50,27 +56,32 @@ class SessionController extends Controller
         ], 201);
     }
 
-    public function start(Request $request, GameSession $session): JsonResponse
+    public function start(Request $request, GameSession $session, LiveQuizBroadcaster $broadcaster): JsonResponse
     {
         $this->authorizeSessionAccess($request->user(), $session);
         $firstQuestion = $session->quiz->questions()->firstOrFail();
+        $session = $session->startQuestion($firstQuestion);
+        $broadcaster->sessionUpdated($session, 'session.started');
 
         return response()->json([
-            'data' => $this->sessionPayload($session->startQuestion($firstQuestion)),
+            'data' => $this->sessionPayload($session),
         ]);
     }
 
-    public function advance(Request $request, GameSession $session): JsonResponse
+    public function advance(Request $request, GameSession $session, LiveQuizBroadcaster $broadcaster): JsonResponse
     {
         $this->authorizeSessionAccess($request->user(), $session);
         abort_if($session->status !== 'active', 422, 'Сессия не активна.');
 
+        $session = $session->moveToNextQuestion();
+        $broadcaster->sessionUpdated($session, 'session.advanced');
+
         return response()->json([
-            'data' => $this->sessionPayload($session->moveToNextQuestion()),
+            'data' => $this->sessionPayload($session),
         ]);
     }
 
-    public function finish(Request $request, GameSession $session): JsonResponse
+    public function finish(Request $request, GameSession $session, LiveQuizBroadcaster $broadcaster): JsonResponse
     {
         $this->authorizeSessionAccess($request->user(), $session);
         $session->update([
@@ -78,13 +89,15 @@ class SessionController extends Controller
             'current_phase' => 'finished',
             'finished_at' => now(),
         ]);
+        $session = $session->fresh();
+        $broadcaster->sessionUpdated($session, 'session.finished');
 
-        return response()->json(['data' => $this->sessionPayload($session->fresh())]);
+        return response()->json(['data' => $this->sessionPayload($session)]);
     }
 
     public function leaderboard(Request $request, GameSession $session): JsonResponse
     {
-        $this->authorizeSessionAccess($request->user(), $session);
+        $this->authorizeSessionAccess($request->user(), $session, allowParticipant: true);
         $session = $session->refreshTimedState();
 
         return response()->json([
@@ -98,15 +111,16 @@ class SessionController extends Controller
         $session = $session->refreshTimedState();
         $questionId = $request->integer('question_id') ?: $session->current_question_id;
         $question = $session->quiz->questions()->with('answers')->findOrFail($questionId);
+        $participantAnswers = $question->participantAnswers()
+            ->whereHas('participant', fn ($query) => $query->where('game_session_id', $session->id))
+            ->get();
 
-        $stats = $question->answers->map(function ($answer) use ($session) {
+        $stats = $question->answers->map(function ($answer) use ($participantAnswers) {
             return [
                 'answer_id' => $answer->id,
                 'text' => $answer->text,
                 'is_correct' => $answer->is_correct,
-                'count' => $answer->participantAnswers()
-                    ->whereHas('participant', fn ($query) => $query->where('game_session_id', $session->id))
-                    ->count(),
+                'count' => $participantAnswers->filter(fn ($row) => in_array($answer->id, $row->selected_answer_ids ?? [], true))->count(),
             ];
         });
 
@@ -115,7 +129,7 @@ class SessionController extends Controller
 
     public function exportCsv(Request $request, GameSession $session)
     {
-        $this->authorizeSessionAccess($request->user(), $session);
+        $this->authorizeSessionAccess($request->user(), $session, allowParticipant: true);
         $rows = $this->leaderboardPayload($session->refreshTimedState());
         $filename = 'livequiz-'.$session->code.'-results.csv';
 
@@ -206,10 +220,34 @@ class SessionController extends Controller
         });
     }
 
-    private function authorizeSessionAccess(User $user, GameSession $session): void
+    private function authorizeSessionAccess(User $user, GameSession $session, bool $allowParticipant = false): void
     {
         $quiz = $session->quiz()->firstOrFail();
 
-        abort_unless($user->isAdmin() || $quiz->user_id === $user->id, 403, 'Нет доступа к этой игровой сессии.');
+        if ($user->isAdmin() || $quiz->user_id === $user->id) {
+            return;
+        }
+
+        if ($allowParticipant && $user->isParticipant()) {
+            $played = $session->participants()->where('participant_user_id', $user->id)->exists();
+            abort_unless($played, 403, 'Нет доступа к этой игровой сессии.');
+
+            return;
+        }
+
+        abort(403, 'Нет доступа к этой игровой сессии.');
+    }
+
+    private function optionalParticipantAccount(Request $request): ?User
+    {
+        $token = $request->bearerToken();
+
+        if (! $token) {
+            return null;
+        }
+
+        $user = User::where('api_token', $token)->first();
+
+        return $user?->isParticipant() ? $user : null;
     }
 }

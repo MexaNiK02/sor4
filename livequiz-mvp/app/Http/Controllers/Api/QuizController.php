@@ -16,6 +16,7 @@ class QuizController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        abort_unless($user->canManageQuizzes(), 403, 'Кабинет квизов доступен только ведущему или администратору.');
 
         $query = Quiz::with('owner:id,name,email,role')
             ->withCount(['questions', 'sessions'])
@@ -30,6 +31,7 @@ class QuizController extends Controller
 
     public function show(Request $request, Quiz $quiz): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'Кабинет квизов доступен только ведущему или администратору.');
         $this->authorizeQuizAccess($request->user(), $quiz);
 
         return response()->json([
@@ -39,6 +41,7 @@ class QuizController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'Создавать квизы может только ведущий или администратор.');
         $payload = $this->validateQuiz($request);
         $user = $request->user();
 
@@ -49,6 +52,7 @@ class QuizController extends Controller
 
     public function update(Request $request, Quiz $quiz): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'Редактировать квизы может только ведущий или администратор.');
         $this->authorizeQuizEdit($request->user(), $quiz);
         $payload = $this->validateQuiz($request);
 
@@ -59,6 +63,7 @@ class QuizController extends Controller
 
     public function destroy(Request $request, Quiz $quiz): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'Удалять квизы может только ведущий или администратор.');
         abort_unless($quiz->user_id === $request->user()->id, 403, 'Удалить квиз может только его создатель.');
 
         $quiz->delete();
@@ -68,6 +73,7 @@ class QuizController extends Controller
 
     public function startSession(Request $request, Quiz $quiz): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'Запускать квизы может только ведущий или администратор.');
         $this->authorizeQuizEdit($request->user(), $quiz);
         abort_if($quiz->questions()->count() === 0, 422, 'Добавьте хотя бы один вопрос.');
 
@@ -86,6 +92,7 @@ class QuizController extends Controller
 
     public function sessions(Request $request, Quiz $quiz): JsonResponse
     {
+        abort_unless($request->user()->canManageQuizzes(), 403, 'История квиза доступна только ведущему или администратору.');
         $this->authorizeQuizAccess($request->user(), $quiz);
 
         $sessions = $quiz->sessions()
@@ -115,7 +122,9 @@ class QuizController extends Controller
             'is_published' => ['boolean'],
             'questions' => ['required', 'array', 'min:1'],
             'questions.*.text' => ['required', 'string', 'max:1000'],
-            'questions.*.type' => ['nullable', 'string', 'in:single_choice'],
+            'questions.*.type' => ['nullable', 'string', 'in:single_choice,multiple_choice'],
+            'questions.*.image_urls' => ['nullable', 'array', 'max:4'],
+            'questions.*.image_urls.*' => ['nullable', 'string', 'max:2000'],
             'questions.*.timer_seconds' => ['required', 'integer', 'min:10', 'max:120'],
             'questions.*.answers' => ['required', 'array', 'min:2', 'max:6'],
             'questions.*.answers.*.text' => ['required', 'string', 'max:255'],
@@ -137,11 +146,19 @@ class QuizController extends Controller
 
         foreach ($payload['questions'] as $questionIndex => $questionPayload) {
             $answers = collect($questionPayload['answers']);
-            abort_if($answers->where('is_correct', true)->count() !== 1, 422, 'У каждого вопроса должен быть один правильный ответ.');
+            $questionType = $questionPayload['type'] ?? 'single_choice';
+            $correctCount = $answers->where('is_correct', true)->count();
+
+            if ($questionType === 'single_choice') {
+                abort_if($correctCount !== 1, 422, 'У вопроса с одиночным выбором должен быть ровно один правильный ответ.');
+            } else {
+                abort_if($correctCount < 1, 422, 'У вопроса с множественным выбором должен быть хотя бы один правильный ответ.');
+            }
 
             $question = $quiz->questions()->create([
                 'text' => $questionPayload['text'],
-                'type' => $questionPayload['type'] ?? 'single_choice',
+                'type' => $questionType,
+                'image_urls' => collect($questionPayload['image_urls'] ?? [])->filter()->take(4)->values()->all(),
                 'timer_seconds' => $questionPayload['timer_seconds'],
                 'position' => $questionIndex + 1,
             ]);

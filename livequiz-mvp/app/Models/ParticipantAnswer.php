@@ -11,6 +11,7 @@ class ParticipantAnswer extends Model
         'participant_id',
         'question_id',
         'answer_id',
+        'selected_answer_ids',
         'question_text',
         'answer_text',
         'is_correct',
@@ -20,6 +21,7 @@ class ParticipantAnswer extends Model
     ];
 
     protected $casts = [
+        'selected_answer_ids' => 'array',
         'is_correct' => 'boolean',
         'score' => 'integer',
         'response_ms' => 'integer',

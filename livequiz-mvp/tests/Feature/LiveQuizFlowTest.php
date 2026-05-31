@@ -214,6 +214,67 @@ class LiveQuizFlowTest extends TestCase
         $this->assertStringContainsString('Место;Имя;Баллы', $content);
     }
 
+    public function test_registered_participant_history_and_multiple_choice_with_images(): void
+    {
+        $headers = $this->hostHeaders('multi-host@example.com');
+
+        $participantAccount = $this->postJson('/api/participant-auth/register', [
+            'name' => 'Игрок',
+            'email' => 'player@example.com',
+            'password' => 'secret123',
+        ])->assertCreated();
+        $participantHeaders = ['Authorization' => 'Bearer '.$participantAccount->json('token')];
+
+        $quizResponse = $this->withHeaders($headers)->postJson('/api/quizzes', [
+            'title' => 'Квиз с несколькими ответами',
+            'questions' => [
+                [
+                    'text' => 'Выберите чётные числа',
+                    'type' => 'multiple_choice',
+                    'image_urls' => [
+                        'https://example.com/one.jpg',
+                        'https://example.com/two.jpg',
+                    ],
+                    'timer_seconds' => 10,
+                    'answers' => [
+                        ['text' => '2', 'is_correct' => true],
+                        ['text' => '3', 'is_correct' => false],
+                        ['text' => '4', 'is_correct' => true],
+                    ],
+                ],
+            ],
+        ])->assertCreated();
+
+        $quizResponse->assertJsonPath('data.questions.0.type', 'multiple_choice')
+            ->assertJsonPath('data.questions.0.image_urls.0', 'https://example.com/one.jpg');
+
+        $quizId = $quizResponse->json('data.id');
+        $correctIds = [
+            $quizResponse->json('data.questions.0.answers.0.id'),
+            $quizResponse->json('data.questions.0.answers.2.id'),
+        ];
+
+        $sessionResponse = $this->withHeaders($headers)->postJson("/api/quizzes/{$quizId}/sessions")->assertCreated();
+        $sessionId = $sessionResponse->json('data.id');
+        $code = $sessionResponse->json('data.code');
+
+        $joinResponse = $this->withHeaders($participantHeaders)->postJson("/api/sessions/{$code}/join", ['name' => 'Игрок'])->assertCreated();
+        $participantId = $joinResponse->json('data.id');
+        $participantToken = $joinResponse->json('token');
+
+        $this->withHeaders($headers)->postJson("/api/sessions/{$sessionId}/start")->assertOk();
+
+        $this->postJson("/api/participants/{$participantId}/answers?token={$participantToken}", [
+            'answer_ids' => $correctIds,
+        ])->assertCreated()
+            ->assertJsonPath('data.is_correct', true);
+
+        $this->withHeaders($participantHeaders)->getJson('/api/participant/history')
+            ->assertOk()
+            ->assertJsonPath('data.0.quiz.title', 'Квиз с несколькими ответами')
+            ->assertJsonPath('data.0.leaderboard.0.name', 'Игрок');
+    }
+
     private function hostHeaders(string $email = 'host@example.com'): array
     {
         return $this->registerHost($email)['headers'];

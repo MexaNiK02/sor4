@@ -36,9 +36,29 @@ class User extends Authenticatable
         return $this->hasMany(Quiz::class);
     }
 
+    public function playedSessions()
+    {
+        return $this->hasMany(Participant::class, 'participant_user_id');
+    }
+
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    public function isHost(): bool
+    {
+        return $this->role === 'host';
+    }
+
+    public function isParticipant(): bool
+    {
+        return $this->role === 'participant';
+    }
+
+    public function canManageQuizzes(): bool
+    {
+        return $this->isAdmin() || $this->isHost();
     }
 
     public function issueApiToken(): string

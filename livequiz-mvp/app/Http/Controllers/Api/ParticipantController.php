@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Answer;
 use App\Models\Participant;
+use App\Services\LiveQuizBroadcaster;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -46,6 +47,8 @@ class ParticipantController extends Controller
                     'current_question' => $session->currentQuestion ? [
                         'id' => $session->currentQuestion->id,
                         'text' => $session->currentQuestion->text,
+                        'type' => $session->currentQuestion->type,
+                        'image_urls' => $session->currentQuestion->image_urls ?? [],
                         'timer_seconds' => $session->currentQuestion->timer_seconds,
                         'position' => $session->currentQuestion->position,
                         'answers' => $session->currentQuestion->answers->map(fn ($answer) => [
@@ -59,6 +62,7 @@ class ParticipantController extends Controller
                         'answered' => (bool) $participantAnswer,
                         'is_correct' => (bool) optional($participantAnswer)->is_correct,
                         'selected_answer_id' => optional($participantAnswer)->answer_id,
+                        'selected_answer_ids' => optional($participantAnswer)->selected_answer_ids ?? [],
                         'score' => (int) optional($participantAnswer)->score,
                     ] : null,
                 ],
@@ -66,12 +70,14 @@ class ParticipantController extends Controller
         ]);
     }
 
-    public function answer(Request $request, Participant $participant): JsonResponse
+    public function answer(Request $request, Participant $participant, LiveQuizBroadcaster $broadcaster): JsonResponse
     {
         $this->authorizeParticipant($request, $participant);
 
         $payload = $request->validate([
-            'answer_id' => ['required', 'integer', 'exists:answers,id'],
+            'answer_id' => ['nullable', 'integer', 'exists:answers,id'],
+            'answer_ids' => ['nullable', 'array', 'min:1'],
+            'answer_ids.*' => ['integer', 'exists:answers,id'],
         ]);
 
         $session = $participant->session()
@@ -86,26 +92,45 @@ class ParticipantController extends Controller
             'Ответ на этот вопрос уже отправлен.'
         );
 
-        $answer = Answer::findOrFail($payload['answer_id']);
-        abort_if($answer->question_id !== $session->current_question_id, 422, 'Ответ не относится к текущему вопросу.');
+        $selectedIds = collect($payload['answer_ids'] ?? [$payload['answer_id'] ?? null])
+            ->filter()
+            ->unique()
+            ->values();
+
+        abort_if($selectedIds->isEmpty(), 422, 'Выберите хотя бы один вариант ответа.');
+        abort_if($session->currentQuestion->type === 'single_choice' && $selectedIds->count() !== 1, 422, 'Для этого вопроса можно выбрать только один ответ.');
+
+        $answers = Answer::whereIn('id', $selectedIds)->get();
+        abort_if($answers->count() !== $selectedIds->count(), 422, 'Некоторые ответы не найдены.');
+        abort_if($answers->contains(fn (Answer $answer) => $answer->question_id !== $session->current_question_id), 422, 'Ответ не относится к текущему вопросу.');
+
+        $correctIds = $session->currentQuestion->answers
+            ->where('is_correct', true)
+            ->pluck('id')
+            ->sort()
+            ->values();
+        $normalizedSelectedIds = $selectedIds->sort()->values();
+        $isCorrect = $correctIds->all() === $normalizedSelectedIds->all();
 
         $responseMs = now()->diffInMilliseconds($session->current_question_started_at);
         $maxMs = max(1, $session->currentQuestion->timer_seconds * 1000);
-        $speedBonus = $answer->is_correct ? max(0, (int) round((1 - min($responseMs, $maxMs) / $maxMs) * 50)) : 0;
-        $score = $answer->is_correct ? 100 + $speedBonus : 0;
+        $speedBonus = $isCorrect ? max(0, (int) round((1 - min($responseMs, $maxMs) / $maxMs) * 50)) : 0;
+        $score = $isCorrect ? 100 + $speedBonus : 0;
 
         $participantAnswer = $participant->answers()->create([
             'question_id' => $session->current_question_id,
-            'answer_id' => $answer->id,
+            'answer_id' => $selectedIds->count() === 1 ? $selectedIds->first() : null,
+            'selected_answer_ids' => $selectedIds->all(),
             'question_text' => $session->currentQuestion->text,
-            'answer_text' => $answer->text,
-            'is_correct' => $answer->is_correct,
+            'answer_text' => $answers->sortBy('position')->pluck('text')->implode(', '),
+            'is_correct' => $isCorrect,
             'score' => $score,
             'response_ms' => $responseMs,
             'answered_at' => now(),
         ]);
 
         $participant->increment('score', $score);
+        $broadcaster->answerReceived($session->fresh(), $participant->id);
 
         return response()->json([
             'data' => $participantAnswer,

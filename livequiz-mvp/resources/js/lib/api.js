@@ -35,3 +35,5 @@ export const api = {
     return `/api/sessions/${sessionId}/export.csv${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   },
 };
+
+export const wsUrl = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:6001';

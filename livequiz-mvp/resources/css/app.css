@@ -22,7 +22,8 @@ a {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -408,6 +409,11 @@ h2 {
   font-weight: 750;
 }
 
+.history-leaders .history-self {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .muted {
   color: #64748b;
   font-size: 14px;
@@ -485,7 +491,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -501,7 +508,8 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
@@ -519,6 +527,35 @@ textarea:focus {
   margin: 12px 0;
   font-size: 18px;
   font-weight: 750;
+}
+
+.question-options-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px);
+  margin: 10px 0;
+}
+
+.image-url-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.question-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.question-images img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
 }
 
 .answer-grid {
@@ -764,6 +801,12 @@ textarea:focus {
   color: #7f1d1d;
 }
 
+.answer-submit {
+  grid-column: 1 / -1;
+  justify-self: center;
+  min-width: min(280px, 100%);
+}
+
 .player-answers.reveal .answer-button {
   cursor: default;
 }
@@ -879,6 +922,8 @@ textarea:focus {
   .analytics-grid,
   .form-grid,
   .answers-preview,
+  .image-url-grid,
+  .question-images,
   .answer-grid,
   .player-answers,
   .result-grid {

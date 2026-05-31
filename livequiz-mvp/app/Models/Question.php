@@ -8,9 +8,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Question extends Model
 {
-    protected $fillable = ['quiz_id', 'text', 'type', 'timer_seconds', 'position'];
+    protected $fillable = ['quiz_id', 'text', 'image_urls', 'type', 'timer_seconds', 'position'];
 
     protected $casts = [
+        'image_urls' => 'array',
         'timer_seconds' => 'integer',
         'position' => 'integer',
     ];
@@ -23,5 +24,10 @@ class Question extends Model
     public function answers(): HasMany
     {
         return $this->hasMany(Answer::class)->orderBy('position');
+    }
+
+    public function participantAnswers(): HasMany
+    {
+        return $this->hasMany(ParticipantAnswer::class);
     }
 }

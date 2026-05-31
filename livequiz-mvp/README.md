@@ -77,7 +77,13 @@ php artisan key:generate
 php artisan migrate --seed
 npm install
 npm run build
+```
+
+После сборки запустите два отдельных PowerShell-окна:
+
+```powershell
 php artisan serve
+npm run ws
 ```
 
 Откройте в браузере:
@@ -125,7 +131,13 @@ php artisan key:generate
 php artisan migrate --seed
 npm install
 npm run build
+```
+
+После сборки запустите два отдельных терминала:
+
+```bash
 php artisan serve --host=127.0.0.1 --port=8000
+npm run ws
 ```
 
 Откройте:
@@ -142,6 +154,7 @@ http://127.0.0.1:8000
 - Администратор: `admin@livequiz.local` / `admin123`
 
 Участникам аккаунт не нужен. Они открывают `/join`, вводят код сессии и имя.
+При желании участник может создать аккаунт на `/participant/login`. Тогда игры, в которые он вошёл из этого аккаунта, сохраняются в разделе `/participant/history`.
 
 ## Основные команды
 
@@ -181,11 +194,18 @@ npm run build
 npm run dev
 ```
 
+Запустить WebSocket-сервер:
+
+```bash
+npm run ws
+```
+
 В режиме разработки обычно запускают два терминала:
 
 ```bash
 php artisan serve
 npm run dev
+npm run ws
 ```
 
 ## Развёртывание на VPS
@@ -208,6 +228,11 @@ php artisan view:cache
 3. В `.env` укажите правильный `APP_URL`.
 4. Настройте веб-сервер так, чтобы корнем сайта была папка `public`.
 5. Для SQLite убедитесь, что PHP имеет права на запись в `database` и `storage`.
+6. WebSocket-сервер нужно запустить отдельным постоянным процессом, например через `systemd`, `pm2` или supervisor:
+
+```bash
+npm run ws
+```
 
 Пример прав на Linux:
 
