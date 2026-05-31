@@ -39,17 +39,26 @@ class QuestionImageController extends Controller
 
     private function downloadAndStoreUrl(string $url): string
     {
-        $response = Http::timeout(8)->get($url);
+        $response = Http::withHeaders([
+            'User-Agent' => 'LiveQuiz/1.0 (+question image downloader)',
+            'Accept' => 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        ])->timeout(12)->get($url);
 
         abort_unless($response->successful(), 422, 'Не удалось скачать картинку по ссылке.');
 
         $contentType = strtolower((string) $response->header('Content-Type'));
-        abort_unless(str_starts_with($contentType, 'image/'), 422, 'Ссылка должна вести на изображение.');
+        $extensionFromUrl = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: '', PATHINFO_EXTENSION));
+        $looksLikeImage = str_starts_with($contentType, 'image/')
+            || in_array($extensionFromUrl, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)
+            || @getimagesizefromstring($response->body()) !== false;
+
+        abort_unless($looksLikeImage, 422, 'Ссылка должна вести на изображение.');
 
         $extension = match (true) {
             str_contains($contentType, 'png') => 'png',
             str_contains($contentType, 'webp') => 'webp',
             str_contains($contentType, 'gif') => 'gif',
+            in_array($extensionFromUrl, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) => $extensionFromUrl,
             default => 'jpg',
         };
 

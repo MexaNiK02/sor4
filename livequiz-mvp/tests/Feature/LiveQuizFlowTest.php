@@ -283,7 +283,7 @@ class LiveQuizFlowTest extends TestCase
         $headers = $this->hostHeaders('image-host@example.com');
         File::deleteDirectory(public_path('uploads/question-images'));
         $imagePath = tempnam(sys_get_temp_dir(), 'livequiz-image-');
-        file_put_contents($imagePath, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='));
+        file_put_contents($imagePath, $this->tinyPngBytes());
 
         $fileResponse = $this->withHeaders($headers)->post('/api/question-images', [
             'image' => new UploadedFile($imagePath, 'question.png', 'image/png', null, true),
@@ -293,7 +293,7 @@ class LiveQuizFlowTest extends TestCase
         $this->assertFileExists(public_path(parse_url($fileResponse->json('url'), PHP_URL_PATH)));
 
         Http::fake([
-            'https://example.com/picture.jpg' => Http::response('fake-image-content', 200, ['Content-Type' => 'image/jpeg']),
+            'https://example.com/picture.jpg' => Http::response($this->tinyPngBytes(), 200, ['Content-Type' => 'application/octet-stream']),
         ]);
 
         $urlResponse = $this->withHeaders($headers)->postJson('/api/question-images', [
@@ -339,5 +339,10 @@ class LiveQuizFlowTest extends TestCase
                 ],
             ],
         ];
+    }
+
+    private function tinyPngBytes(): string
+    {
+        return base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=');
     }
 }

@@ -13,6 +13,7 @@
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
 }
 
 a {
@@ -485,6 +486,7 @@ h2 {
 label {
   display: grid;
   gap: 7px;
+  min-width: 0;
   color: #344256;
   font-size: 14px;
   font-weight: 800;
@@ -493,6 +495,7 @@ label {
 input,
 textarea,
 select {
+  min-width: 0;
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -515,6 +518,8 @@ select:focus {
 }
 
 .question-editor {
+  min-width: 0;
+  overflow: hidden;
   padding: 20px;
 }
 
@@ -545,6 +550,7 @@ select:focus {
 .question-image-editor {
   display: grid;
   gap: 12px;
+  min-width: 0;
   margin-bottom: 12px;
 }
 
@@ -559,14 +565,14 @@ select:focus {
   overflow: hidden;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #fff;
 }
 
 .question-image-preview img {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 10;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .question-image-preview button {
@@ -586,7 +592,13 @@ select:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
+  min-width: 0;
   align-items: end;
+}
+
+.question-image-add input[type="url"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-picker {
@@ -594,11 +606,13 @@ select:focus {
   align-items: center;
   justify-content: center;
   min-height: 47px;
+  max-width: 100%;
   padding: 10px 14px;
   border-radius: 8px;
   background: #eff6ff;
   color: #1d4ed8;
   font-weight: 850;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -616,10 +630,10 @@ select:focus {
 .question-images img {
   width: 100%;
   aspect-ratio: 16 / 9;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 8px;
   border: 1px solid #dbe3ef;
-  background: #f8fafc;
+  background: #fff;
 }
 
 .answer-grid {

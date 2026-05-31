@@ -160,6 +160,7 @@ function QuestionImageEditor({ images, draft, loading, onDraftChange, onUrlKeyDo
         <div className="question-image-add">
           <label>Картинка {images.length + 1}
             <input
+              type="url"
               placeholder="Вставьте ссылку и нажмите Enter"
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
@@ -582,6 +583,8 @@ function QuizBuilder({ user, onLogout }) {
   function handleImageUrlKeyDown(event, questionIndex) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
+    event.stopPropagation();
+    if (uploadingImage !== null) return;
     const url = (imageDrafts[questionIndex] || '').trim();
     if (url) uploadQuestionImage(questionIndex, { url });
   }
