@@ -42,6 +42,8 @@ class QuestionImageController extends Controller
         $response = Http::withHeaders([
             'User-Agent' => 'LiveQuiz/1.0 (+question image downloader)',
             'Accept' => 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        ])->withOptions([
+            'verify' => (bool) config('services.livequiz_images.verify_ssl', false),
         ])->timeout(12)->get($url);
 
         abort_unless($response->successful(), 422, 'Не удалось скачать картинку по ссылке.');
