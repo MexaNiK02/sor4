@@ -10,31 +10,44 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        $admin = User::create([
-            'name' => 'Администратор',
-            'email' => 'admin@livequiz.local',
-            'password' => 'admin123',
-            'role' => 'admin',
-        ]);
+        $admin = User::updateOrCreate(
+            ['email' => 'admin@livequiz.local'],
+            [
+                'name' => 'Администратор',
+                'password' => 'admin123',
+                'role' => 'admin',
+            ]
+        );
 
-        $host = User::create([
-            'name' => 'Преподаватель',
-            'email' => 'host@livequiz.local',
-            'password' => 'host123',
-            'role' => 'host',
-        ]);
+        $host = User::updateOrCreate(
+            ['email' => 'host@livequiz.local'],
+            [
+                'name' => 'Преподаватель',
+                'password' => 'host123',
+                'role' => 'host',
+            ]
+        );
 
-        $quiz = Quiz::create([
-            'user_id' => $host->id,
-            'title' => 'Демо: цифровая грамотность',
-            'description' => 'Короткая викторина для демонстрации live-сессии, рейтинга и скорости ответа.',
-            'host_name' => $host->name,
-            'is_published' => true,
-        ]);
+        $quiz = Quiz::updateOrCreate(
+            [
+                'user_id' => $host->id,
+                'title' => 'Демо: цифровая грамотность',
+            ],
+            [
+                'description' => 'Короткая викторина для демонстрации live-сессии, рейтинга и скорости ответа.',
+                'host_name' => $host->name,
+                'is_published' => true,
+            ]
+        );
+
+        if ($quiz->questions()->exists()) {
+            return;
+        }
 
         $questions = [
             [
                 'text' => 'Что лучше всего описывает MVP?',
+                'type' => 'single_choice',
                 'timer_seconds' => 25,
                 'answers' => [
                     ['Минимально жизнеспособный продукт', true],
@@ -45,6 +58,7 @@ class DatabaseSeeder extends Seeder
             ],
             [
                 'text' => 'Какой способ подключения аудитории самый удобный для live-викторины?',
+                'type' => 'single_choice',
                 'timer_seconds' => 20,
                 'answers' => [
                     ['Код, ссылка или QR-код', true],
@@ -54,13 +68,14 @@ class DatabaseSeeder extends Seeder
                 ],
             ],
             [
-                'text' => 'За что участник получает больше баллов в режиме “молния”?',
+                'text' => 'Что можно выбрать в вопросе с множественным выбором?',
+                'type' => 'multiple_choice',
                 'timer_seconds' => 30,
                 'answers' => [
-                    ['За быстрый правильный ответ', true],
-                    ['За самый длинный никнейм', false],
-                    ['За пропуск вопроса', false],
-                    ['За поздний неправильный ответ', false],
+                    ['Несколько правильных вариантов', true],
+                    ['Только один вариант', false],
+                    ['Все подходящие ответы', true],
+                    ['Ни одного ответа', false],
                 ],
             ],
         ];
@@ -68,7 +83,9 @@ class DatabaseSeeder extends Seeder
         foreach ($questions as $questionIndex => $item) {
             $question = $quiz->questions()->create([
                 'text' => $item['text'],
+                'type' => $item['type'],
                 'timer_seconds' => $item['timer_seconds'],
+                'image_urls' => [],
                 'position' => $questionIndex + 1,
             ]);
 
